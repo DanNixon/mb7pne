@@ -1,0 +1,132 @@
+---
+- name: Setup DAPNET modem
+  hosts: all
+
+  handlers:
+    - name: Restart remote-closedown
+      become: true
+      ansible.builtin.service:
+        name: remote-closedown
+        state: restarted
+
+    - name: Restart UniPager
+      become: true
+      ansible.builtin.service:
+        name: unipager
+        state: restarted
+
+    - name: Restart unipager-status-mqtt
+      become: true
+      ansible.builtin.service:
+        name: unipager-status-mqtt
+        state: restarted
+
+  pre_tasks:
+    - name: Set secrets
+      ansible.builtin.set_fact:
+        secrets:
+          mqtt_passwords: "{{ lookup('community.general.passwordstore', 'ansible_secrets/mb7pmf/mqtt_passwords returnall=true') | from_yaml }}"
+          dapnet_authkey: "{{ lookup('community.general.passwordstore', 'ansible_secrets/mb7pmf/dapnet_authkey') | from_yaml }}"
+
+    - name: Ensure community repository is enabled
+      become: true
+      ansible.builtin.lineinfile:
+        dest: /etc/apk/repositories
+        line: 'http://dl-cdn.alpinelinux.org/alpine/v3.15/community'
+
+  roles:
+    - dannixon.system.nftables
+    - dannixon.system.tailscale
+    - dannixon.services.sshd
+    - dannixon.services.prometheus_node_exporter
+
+  tasks:
+    - name: Ensure required packages are installed
+      become: true
+      ansible.builtin.package:
+        name:
+          - alsa-utils
+          - htop
+        state: present
+
+    - name: Ensure OpenRC configs are present
+      become: true
+      ansible.builtin.copy:
+        src: "{{ item }}.openrc"
+        dest: "/etc/init.d/{{ item }}"
+        mode: "u=rwx,g=rx,o=rx"
+      loop:
+        - remote-closedown
+        - unipager
+        - unipager-status-mqtt
+
+    - name: Ensure remote-closedown binary is present
+      become: true
+      ansible.builtin.get_url:
+        url: https://github.com/DanNixon/remote-closedown/releases/download/v0.4.1/remote-closedown-aarch64-unknown-linux-musl
+        dest: /usr/bin/remote-closedown
+        mode: "u=rwx,g=rx,o=rx"
+      notify: Restart remote-closedown
+
+    - name: Ensure remote-closedown config is present
+      become: true
+      ansible.builtin.template:
+        src: remote-closedown.toml
+        dest: /etc
+        mode: "u=r,g=r,o=r"
+      notify: Restart remote-closedown
+
+    - name: Ensure UniPager binary is present
+      become: true
+      ansible.builtin.get_url:
+        url: https://github.com/DanNixon/UniPager-v1/releases/download/v1.0.3-1-aarch64/unipager
+        dest: /usr/bin/unipager
+        mode: "u=rwx,g=rx,o=rx"
+      notify: Restart UniPager
+
+    - name: Ensure UniPager config is present
+      become: true
+      ansible.builtin.template:
+        src: unipager.json
+        dest: /etc
+        mode: "u=r,g=r,o=r"
+      notify: Restart UniPager
+
+    - name: Ensure unipager-status-mqtt binary is present
+      become: true
+      ansible.builtin.get_url:
+        url: https://github.com/DanNixon/unipager-status-mqtt/releases/download/v0.2.0/unipager-mqtt-status-aarch64-unknown-linux-musl
+        dest: /usr/bin/unipager-status-mqtt
+        mode: "u=rwx,g=rx,o=rx"
+      notify: Restart unipager-status-mqtt
+
+    - name: Ensure unipager-status-mqtt config is present
+      become: true
+      ansible.builtin.template:
+        src: unipager-status-mqtt.toml
+        dest: /etc
+        mode: "u=r,g=r,o=r"
+      notify: Restart unipager-status-mqtt
+
+    - name: Ensure required services are enabled
+      become: true
+      ansible.builtin.service:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - remote-closedown
+        - unipager
+        - unipager-status-mqtt
+
+    - name: LBU commit
+      become: true
+      community.general.lbu:
+        commit: true
+        include:
+          - /etc/init.d/remote-closedown
+          - /etc/init.d/unipager
+          - /etc/init.d/unipager-status-mqtt
+          - /usr/bin/remote-closedown
+          - /usr/bin/unipager
+          - /usr/bin/unipager-status-mqtt
