@@ -1,6 +1,6 @@
 ---
 transmitter_callsign: mb7pne
-mqtt_broker: tcp://148.251.17.255:1883
+mqtt_broker: tcp://mqtt.makerspace.dan-nixon.com:1883
 
 nftables_tables:
   - name: filter
